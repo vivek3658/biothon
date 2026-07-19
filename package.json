@@ -1,0 +1,22 @@
+{
+  "name": "biothon-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "fastify": "^5.3.0",
+    "fastify-plugin": "^6.0.0",
+    "mongoose": "^9.7.4",
+    "nodemon": "^3.1.14"
+  },
+  "main": "index.js",
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": ""
+}
