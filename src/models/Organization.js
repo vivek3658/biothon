@@ -17,7 +17,7 @@ const OrganizationSchema = new mongoose.Schema({
   facilityType: {
     type: String,
     required: true,
-    enum: ['hospital', 'clinic', 'laboratory'],
+    enum: ['hospital', 'clinic', 'laboratory', 'pharmacy', 'other'],
     default: 'hospital'
   },
   contactNumber: {
@@ -43,6 +43,11 @@ const OrganizationSchema = new mongoose.Schema({
     enum: ['pending', 'approved', 'rejected'],
     default: 'pending'
   },
+  rejectionReason: {
+    type: String,
+    trim: true,
+    default: ''
+  },
   organizationCertificateNo: {
     type: String,
     required: true,
@@ -67,5 +72,12 @@ const OrganizationSchema = new mongoose.Schema({
     trim: true
   }]
 }, { timestamps: true });
+
+OrganizationSchema.virtual('managerApprovalStatus').get(function managerApprovalStatus() {
+  return this.verificationStatus;
+});
+
+OrganizationSchema.set('toJSON', { virtuals: true });
+OrganizationSchema.set('toObject', { virtuals: true });
 
 module.exports = mongoose.model('Organization', OrganizationSchema);

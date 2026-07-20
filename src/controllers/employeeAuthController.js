@@ -13,7 +13,7 @@ exports.getMe = async (request, reply) => {
       return reply.code(401).send({ error: 'Unauthorized: No session token found' });
     }
 
-    const decoded = request.server.jwt.decode(token);
+    const decoded = await request.server.jwt.verify(token);
     
     if (!decoded) {
       return reply.code(400).send({ error: 'Bad Request: Token decoding failed' });

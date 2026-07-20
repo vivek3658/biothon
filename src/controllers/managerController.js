@@ -1,4 +1,3 @@
-const Account = require('../models/Account');
 const Organization = require('../models/Organization');
 const User = require('../models/User');
 
@@ -62,7 +61,7 @@ exports.verifyOrganization = async (request, reply) => {
 
     if (action === 'approve') {
       organization.verificationStatus = 'approved';
-      organization.rejectionReason = null;
+      organization.rejectionReason = '';
       await organization.save();
 
       return reply.send({
@@ -99,13 +98,18 @@ exports.getPendingDoctors = async (request, reply) => {
       isDoctor: true,
       'doctorDetails.managerApprovalStatus': 'pending'
     })
-    .populate('accountId', '-password')
+    .populate('accountId', 'email role')
     .populate('doctorDetails.affiliateOrganization', 'name facilityType location');
+
+    const doctors = pendingDoctors.map((doctor) => ({
+      ...doctor.toObject(),
+      email: doctor.accountId?.email || ''
+    }));
 
     return reply.send({
       success: true,
-      count: pendingDoctors.length,
-      doctors: pendingDoctors
+      count: doctors.length,
+      doctors
     });
   } catch (err) {
     return reply.code(500).send({

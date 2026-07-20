@@ -16,7 +16,7 @@ const AccountSchema = new mongoose.Schema({
   role: {
     type: String,
     required: true,
-    enum: ['patient', 'doctor', 'hospital', 'clinic', 'laboratory']
+    enum: ['patient', 'doctor', 'hospital', 'clinic', 'laboratory', 'pharmacy', 'other']
   },
   entityId: {
     type: mongoose.Schema.Types.ObjectId,

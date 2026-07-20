@@ -3,7 +3,7 @@ const Manager = require('../models/Manager');
 const bcrypt = require('bcrypt');
 
 exports.createManager = async (request, reply) => {
-  const { username, password } = request.body;
+  const { username, password, name, email } = request.body;
 
   // Strict Validation Constraint
   if (!username || !password || username.trim().length === 0 || password.length < 6 || password.length > 20) {
@@ -18,7 +18,9 @@ exports.createManager = async (request, reply) => {
   const hashedPassword = await bcrypt.hash(password, 10);
   const newManager = new Manager({
     username: username.toLowerCase().trim(),
-    password: hashedPassword
+    password: hashedPassword,
+    name: name?.trim?.() || '',
+    email: email?.toLowerCase?.().trim?.() || ''
   });
 
   await newManager.save();
@@ -57,8 +59,17 @@ exports.getManagerById = async (request, reply) => {
 };
 
 exports.updateManager = async (request, reply) => {
-  const { password } = request.body;
+  const { username, password, name, email } = request.body || {};
   const updates = {};
+
+  if (username && username.trim()) {
+    const cleanUsername = username.toLowerCase().trim();
+    const existing = await Manager.findOne({ username: cleanUsername, _id: { $ne: request.params.id } });
+    if (existing) {
+      return reply.code(409).send({ error: 'Conflict: Manager username already registered' });
+    }
+    updates.username = cleanUsername;
+  }
 
   if (password) {
     if (password.length < 6 || password.length > 20) {
@@ -66,6 +77,9 @@ exports.updateManager = async (request, reply) => {
     }
     updates.password = await bcrypt.hash(password, 10);
   }
+
+  if (typeof name === 'string') updates.name = name.trim();
+  if (typeof email === 'string') updates.email = email.toLowerCase().trim();
 
   const updatedManager = await Manager.findByIdAndUpdate(
     request.params.id,

@@ -5,6 +5,7 @@ const { authenticate } = require('../middlewares/authMiddleware');
 async function userRoutes(fastify, options) {
   // Public Auth
   fastify.post('/user/login', userController.userLogin);
+  fastify.post('/user/logout', userController.logout);
 
   // Authenticated User State (Supports both GET and POST for complete-profile to prevent 404s)
   fastify.get('/user/complete-profile', { preHandler: [authenticate] }, userController.getUserMe);

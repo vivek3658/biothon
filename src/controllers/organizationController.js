@@ -17,7 +17,7 @@ exports.searchOrganizations = async (request, reply) => {
     }
 
     const orgs = await Organization.find(filter)
-      .select('name facilityType location workingDays contactNumber managerApprovalStatus')
+      .select('name facilityType location workingDays contactNumber verificationStatus')
       .limit(50)
       .lean();
 
@@ -48,9 +48,20 @@ exports.getPendingDoctors = async (request, reply) => {
         { 'doctorDetails.affiliateOrganization': org.accountId },
         { _id: { $in: org.doctors || [] } }
       ]
-    }).select('name email bloodGroup doctorDetails location isDoctor').lean();
+    })
+      .populate({
+        path: 'accountId',
+        select: 'email'
+      })
+      .select('name bloodGroup doctorDetails location isDoctor')
+      .lean();
 
-    return reply.send({ success: true, doctors, orgId: org._id });
+    const normalizedDoctors = doctors.map((doctor) => ({
+      ...doctor,
+      email: doctor.accountId?.email || ''
+    }));
+
+    return reply.send({ success: true, doctors: normalizedDoctors, orgId: org._id });
   } catch (err) {
     console.error('getPendingDoctors error:', err);
     return reply.code(500).send({ error: 'Failed to retrieve doctors.', details: err.message });
@@ -152,7 +163,8 @@ exports.updateOrgProfile = async (request, reply) => {
 
   const allowedUpdates = [
     'name', 'contactNumber', 'location', 'coordinates',
-    'workingDays', 'specialities', 'organizationCertificateUrl'
+    'workingDays', 'specialities', 'organizationCertificateUrl',
+    'organizationCertificateNo', 'facilityType'
   ];
 
   const updateFields = {};

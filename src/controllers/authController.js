@@ -134,6 +134,10 @@ exports.completeOrgProfile = async (request, reply) => {
       organization.contactNumber = contactNumber || organization.contactNumber || '+91 9876543210';
       organization.location = cleanLocation;
       organization.coordinates = cleanCoords;
+      organization.organizationCertificateNo = organizationCertificateNo || organization.organizationCertificateNo || `REG-${Date.now()}`;
+      organization.organizationCertificateUrl = organizationCertificateUrl || organization.organizationCertificateUrl || 'https://example.com/cert.pdf';
+      organization.workingDays = Array.isArray(workingDays) && workingDays.length ? workingDays : (organization.workingDays || ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']);
+      organization.specialities = Array.isArray(specialities) && specialities.length ? specialities : (organization.specialities || ['General Medicine']);
     } else {
       organization = new Organization({
         accountId: account._id,
@@ -146,7 +150,8 @@ exports.completeOrgProfile = async (request, reply) => {
         organizationCertificateUrl: organizationCertificateUrl || 'https://example.com/cert.pdf',
         workingDays: workingDays || ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'],
         specialities: specialities || ['General Medicine'],
-        verificationStatus: 'pending'
+        verificationStatus: 'pending',
+        rejectionReason: ''
       });
     }
 
@@ -194,6 +199,10 @@ exports.organizationLogin = async (request, reply) => {
       return reply.code(401).send({ error: 'No organization account found with this email.' });
     }
 
+    if (account.entityModel !== 'Organization') {
+      return reply.code(403).send({ error: 'This account is not registered as an organization.' });
+    }
+
     const isMatch = await bcrypt.compare(password, account.password);
     if (!isMatch) {
       return reply.code(401).send({ error: 'Invalid organization email or password.' });
@@ -211,7 +220,8 @@ exports.organizationLogin = async (request, reply) => {
         coordinates: [77.2090, 28.6139],
         organizationCertificateNo: `REG-${Date.now()}`,
         organizationCertificateUrl: 'https://example.com/cert.pdf',
-        verificationStatus: 'approved'
+        verificationStatus: 'approved',
+        rejectionReason: ''
       });
       await organization.save();
       account.entityId = organization._id;

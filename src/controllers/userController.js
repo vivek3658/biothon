@@ -28,6 +28,10 @@ exports.userLogin = async (request, reply) => {
       return reply.code(401).send({ error: 'No user account found with this email. Please register.' });
     }
 
+    if (account.entityModel !== 'User') {
+      return reply.code(403).send({ error: 'This account is not registered as a patient or doctor.' });
+    }
+
     const isMatch = await bcrypt.compare(password, account.password);
     if (!isMatch) {
       return reply.code(401).send({ error: 'Invalid email or password.' });
@@ -72,6 +76,11 @@ exports.userLogin = async (request, reply) => {
     console.error('userLogin error:', err);
     return reply.code(500).send({ error: 'Login failed due to a server error.', details: err.message });
   }
+};
+
+exports.logout = async (request, reply) => {
+  reply.clearCookie('token', { path: '/' });
+  return reply.send({ success: true, message: 'Logged out successfully.' });
 };
 
 // 2. Complete User Profile (Patient or Doctor)
@@ -204,6 +213,10 @@ exports.getUserMe = async (request, reply) => {
         .populate({
           path: 'managedProfiles',
           select: 'name isDoctor bloodGroup location doctorDetails'
+        })
+        .populate({
+          path: 'accountId',
+          select: 'email role'
         })
         .populate({
           path: 'doctorDetails.affiliateOrganization',

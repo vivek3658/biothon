@@ -13,6 +13,17 @@ const ManagerSchema = new mongoose.Schema({
     type: String,
     required: true
   },
+  name: {
+    type: String,
+    trim: true,
+    default: ''
+  },
+  email: {
+    type: String,
+    trim: true,
+    lowercase: true,
+    default: ''
+  },
   role: {
     type: String,
     enum: ['manager'],
