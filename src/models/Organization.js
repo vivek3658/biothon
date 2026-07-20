@@ -2,7 +2,6 @@
 const mongoose = require('mongoose');
 
 const OrganizationSchema = new mongoose.Schema({
-  // The primary key reference back to the parent Account identity
   accountId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Account',
@@ -12,29 +11,32 @@ const OrganizationSchema = new mongoose.Schema({
   name: {
     type: String,
     required: true,
-    trim: true
+    trim: true,
+    default: 'Healthcare Facility'
   },
   facilityType: {
     type: String,
     required: true,
-    enum: ['hospital', 'clinic', 'laboratory']
+    enum: ['hospital', 'clinic', 'laboratory'],
+    default: 'hospital'
   },
   contactNumber: {
     type: String,
     required: true,
-    trim: true
+    trim: true,
+    default: '+91 9876543210'
   },
   location: {
-    buildingNo: { type: String, trim: true },
+    buildingNo: { type: String, trim: true, default: '' },
     floorNo: { type: Number, default: 0 },
-    landmark: { type: String, trim: true },
-    city: { type: String, required: true, trim: true },
-    state: { type: String, required: true, trim: true },
-    pincode: { type: String, required: true, match: /^[0-9]{6}$/ }
+    landmark: { type: String, trim: true, default: '' },
+    city: { type: String, required: true, trim: true, default: 'New Delhi' },
+    state: { type: String, required: true, trim: true, default: 'Delhi' },
+    pincode: { type: String, required: true, default: '110001' }
   },
   coordinates: {
-    type: { type: String, enum: ['Point'], default: 'Point' },
-    coordinates: { type: [Number], required: true } // [longitude, latitude]
+    type: [Number],
+    default: [77.2090, 28.6139] // [longitude, latitude]
   },
   verificationStatus: {
     type: String,
@@ -44,12 +46,13 @@ const OrganizationSchema = new mongoose.Schema({
   organizationCertificateNo: {
     type: String,
     required: true,
-    unique: true,
-    trim: true
+    trim: true,
+    default: () => `REG-${Date.now()}`
   },
   organizationCertificateUrl: {
     type: String,
-    required: true
+    required: true,
+    default: 'https://example.com/cert.pdf'
   },
   doctors: [{
     type: mongoose.Schema.Types.ObjectId,
@@ -65,6 +68,4 @@ const OrganizationSchema = new mongoose.Schema({
   }]
 }, { timestamps: true });
 
-OrganizationSchema.index({ coordinates: '2dsphere' });
-
-module.exports = mongoose.model('Organization', OrganizationSchema);    
+module.exports = mongoose.model('Organization', OrganizationSchema);

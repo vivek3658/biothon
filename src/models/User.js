@@ -2,91 +2,88 @@
 const mongoose = require('mongoose');
 
 const UserSchema = new mongoose.Schema({
-  email: {
-    type: String,
+  accountId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Account',
     required: true,
-    unique: true,
-    lowercase: true,
-    trim: true
+    unique: true
   },
   name: {
     type: String,
     required: true,
     trim: true,
-    maxlength: 20
-  },
-  password: {
-    type: String,
-    required: true,
-    minlength: 6,
-    maxlength: 20,
-    trim: true
+    default: 'User'
   },
   isDoctor: {
     type: Boolean,
     default: false
   },
   location: {
-    roomNo: { type: String, trim: true },
+    roomNo: { type: String, trim: true, default: '' },
     floorNo: { type: Number, default: 0 },
-    landmark: { type: String, trim: true },
-    city: { type: String, required: true, trim: true },
-    state: { type: String, required: true, trim: true },
-    pincode: { type: String, required: true, match: /^[0-9]{6}$/ }
+    landmark: { type: String, trim: true, default: '' },
+    city: { type: String, required: true, trim: true, default: 'New Delhi' },
+    state: { type: String, required: true, trim: true, default: 'Delhi' },
+    pincode: { type: String, required: true, default: '110001' }
   },
   coordinates: {
-    type: { type: String, enum: ['Point'], default: 'Point' },
-    coordinates: { type: [Number], required: true } // [longitude, latitude]
+    type: [Number],
+    default: [77.2090, 28.6139] // [longitude, latitude]
   },
   managedProfiles: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
   }],
+  pendingProfileRequests: [{
+    fromUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    fromEmail: { type: String, trim: true, lowercase: true },
+    status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' }
+  }],
   bloodGroup: {
     type: String,
-    enum: ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'],
+    enum: ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-', null],
     default: null
   },
   prescriptions: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Prescription'
   }],
-  // Conditional Object structured strictly according to your rules
+  reports: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Report'
+  }],
   doctorDetails: {
-    certificateNo: { type: String, default: null },
-    certificateDoc: { type: String, default: null },
-    organizationId: { type: mongoose.Schema.Types.ObjectId, ref: 'Organization', default: null },
-    organizationApprovalStatus: { type: String, enum: ['pending', 'approved', 'rejected', null], default: null },
-    speciality: { type: String, default: null },
+    certificateNo: { type: String, default: null, trim: true },
+    certificateDoc: { type: String, default: null, trim: true },
+    affiliateOrganization: { type: mongoose.Schema.Types.ObjectId, ref: 'Organization', default: null },
+    affiliateOrganizationApprovalStatus: { type: String, enum: ['pending', 'approved', 'rejected', null], default: null },
+    speciality: { type: String, default: null, trim: true },
     managerApprovalStatus: { type: String, enum: ['pending', 'approved', 'rejected', null], default: null }
   }
 }, { timestamps: true });
 
-UserSchema.index({ coordinates: '2dsphere' });
-
-// Validation and Nullification Layer
-UserSchema.pre('save', function(next) {
+// Pre-save validation & default assignments for Doctor vs Patient
+UserSchema.pre('save', function() {
   if (this.isDoctor) {
-    const details = this.doctorDetails;
-    // Enforce presence of required doctor credentials manually since fields are technically nullable
-    if (!details.certificateNo || !details.certificateDoc || !details.organizationId || !details.speciality) {
-      return next(new Error('Validation Failed: Doctor details are mandatory when isDoctor is true.'));
+    if (!this.doctorDetails) {
+      this.doctorDetails = {};
     }
-    // Set default statuses if they are new or empty
-    if (!details.organizationApprovalStatus) details.organizationApprovalStatus = 'pending';
-    if (!details.managerApprovalStatus) details.managerApprovalStatus = 'pending';
+    if (!this.doctorDetails.affiliateOrganizationApprovalStatus) {
+      this.doctorDetails.affiliateOrganizationApprovalStatus = 'pending';
+    }
+    if (!this.doctorDetails.managerApprovalStatus) {
+      this.doctorDetails.managerApprovalStatus = 'pending';
+    }
   } else {
-    // Force evaluation to null if the user is strictly a patient
     this.doctorDetails = {
       certificateNo: null,
       certificateDoc: null,
-      organizationId: null,
-      organizationApprovalStatus: null,
+      affiliateOrganization: null,
+      affiliateOrganizationApprovalStatus: null,
       speciality: null,
       managerApprovalStatus: null
     };
   }
-  next();
 });
 
 module.exports = mongoose.model('User', UserSchema);

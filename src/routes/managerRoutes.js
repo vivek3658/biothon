@@ -17,11 +17,31 @@ async function managerRoutes(fastify, options) {
     managerController.getPendingOrganizations
   );
 
+  // Get list of all organizations (with optional status filter)
+  fastify.get(
+    '/manager/organizations',
+    requireManagerOrAdmin,
+    managerController.getAllOrganizations
+  );
+
   // Approve or reject target organization
   fastify.patch(
     '/manager/organizations/:orgId/verify', 
     requireManagerOrAdmin, 
     managerController.verifyOrganization
+  );
+
+  // Manager Doctor Verifications
+  fastify.get(
+    '/manager/doctors/pending',
+    requireManagerOrAdmin,
+    managerController.getPendingDoctors
+  );
+
+  fastify.patch(
+    '/manager/doctors/:doctorId/verify',
+    requireManagerOrAdmin,
+    managerController.verifyDoctor
   );
 }
 
