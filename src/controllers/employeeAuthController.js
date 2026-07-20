@@ -4,20 +4,21 @@ const bcrypt = require('bcrypt');
 // controllers/employeeAuthController.js
 exports.getMe = async (request, reply) => {
   try {
-    const token = request.cookies.token;
-    
-    if (!token) {
+    let token = request.cookies?.token;
+    if (!token && request.headers.authorization) {
+      token = request.headers.authorization.replace(/^Bearer\s+/i, '').trim();
+    }
+
+    if (!token || token === 'undefined' || token === 'null') {
       return reply.code(401).send({ error: 'Unauthorized: No session token found' });
     }
 
-    // Manually decode the token using the fastify instance utility
     const decoded = request.server.jwt.decode(token);
     
     if (!decoded) {
       return reply.code(400).send({ error: 'Bad Request: Token decoding failed' });
     }
 
-    // Return the specific identities directly from the payload
     return {
       identity: {
         id: decoded.id || null,
@@ -31,13 +32,12 @@ exports.getMe = async (request, reply) => {
 };
 
 exports.logout = async (request, reply) => {
-    reply.clearCookie('token', { path: '/' });
-    return { success: true, message: 'Session successfully revoked' };
+  reply.clearCookie('token', { path: '/' });
+  return { success: true, message: 'Session successfully revoked' };
 };
-// Inside controllers/employeeAuthController.js
 
 exports.login = async (request, reply) => {
-  const { username, password } = request.body;
+  const { username, password } = request.body || {};
 
   if (!username || !password) {
     return reply.code(400).send({ error: 'Username and password are required' });
@@ -67,7 +67,6 @@ exports.login = async (request, reply) => {
     return reply.code(401).send({ error: 'Unauthorized: Invalid credentials' });
   }
 
-  // Access the fastify instance safely via the request context
   const token = request.server.jwt.sign(payload);
 
   reply.setCookie('token', token, {
@@ -78,5 +77,5 @@ exports.login = async (request, reply) => {
     maxAge: 28800000 // 8 hours
   });
 
-  return { success: true, role: selectedRole };
+  return { success: true, role: selectedRole, token };
 };

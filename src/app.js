@@ -8,12 +8,18 @@ const { authenticate } = require('./middlewares/authMiddleware');
 require('./models/Account');
 require('./models/User');
 require('./models/Organization');
+require('./models/Medicine');
+require('./models/Prescription');
 
 const buildApp = () => {
-  const fastify = Fastify({ logger: true });
+  // Set pluginTimeout to 60s so slow DB connections don't trigger FST_ERR_PLUGIN_TIMEOUT
+  const fastify = Fastify({ 
+    logger: true,
+    pluginTimeout: 60000 
+  });
 
   // Add CORS headers hook for local frontend dev server
-  fastify.addHook('onRequest', (request, reply, done) => {
+  fastify.addHook('onRequest', async (request, reply) => {
     const origin = request.headers.origin;
     if (origin) {
       reply.header('Access-Control-Allow-Origin', origin);
@@ -24,7 +30,6 @@ const buildApp = () => {
     if (request.method === 'OPTIONS') {
       return reply.code(204).send();
     }
-    done();
   });
 
   // 1. Response Compression Middleware (Gzip/Brotli)
@@ -55,10 +60,12 @@ const buildApp = () => {
   // 5. Register application routes
   fastify.register(employeeAuthRoutes); 
   fastify.register(require('./routes/adminRoutes'));
+  fastify.register(require('./routes/medicineRoutes'));
   fastify.register(require('./routes/authRoutes'));
   fastify.register(require('./routes/managerRoutes'));
   fastify.register(require('./routes/organizationRoutes'));
   fastify.register(require('./routes/userRoutes'));
+  fastify.register(require('./routes/prescriptionRoutes'));
   
   // Health check
   fastify.get('/health', async (request, reply) => {

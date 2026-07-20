@@ -1,13 +1,18 @@
-// src/db.js
+// src/config/db.js
 const fp = require('fastify-plugin');
 const mongoose = require('mongoose');
 
 const dbConnector = async (fastify, options) => {
   try {
-    // Connect using the variable loaded by dotenv
-    await mongoose.connect(process.env.MONGO_URI);
+    const mongoUri = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/arogyax';
     
-    // Share mongoose with the rest of the app
+    // Connect to MongoDB with connection timeouts
+    await mongoose.connect(mongoUri, {
+      serverSelectionTimeoutMS: 30000,
+      connectTimeoutMS: 30000
+    });
+    
+    // Share mongoose with fastify instance
     fastify.decorate('mongoose', mongoose);
     console.log('MongoDB connected successfully!');
   } catch (error) {

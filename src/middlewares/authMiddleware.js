@@ -2,14 +2,23 @@
 
 async function extractToken(request) {
   let token = request.cookies?.token;
-  if (!token && request.headers.authorization) {
-    token = request.headers.authorization.replace(/^Bearer\s+/i, '');
+  if (!token || token === 'undefined' || token === 'null') {
+    if (request.headers.authorization) {
+      token = request.headers.authorization.replace(/^Bearer\s+/i, '').trim();
+    }
   }
-  if (!token && request.headers['x-access-token']) {
-    token = request.headers['x-access-token'];
+  if (!token || token === 'undefined' || token === 'null') {
+    if (request.headers['x-access-token']) {
+      token = request.headers['x-access-token'];
+    }
   }
-  if (!token && request.query?.token) {
-    token = request.query.token;
+  if (!token || token === 'undefined' || token === 'null') {
+    if (request.query?.token) {
+      token = request.query.token;
+    }
+  }
+  if (token === 'undefined' || token === 'null') {
+    token = null;
   }
   return token;
 }

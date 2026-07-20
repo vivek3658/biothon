@@ -1,13 +1,148 @@
 const mongoose = require('mongoose');
 const Account = require('../models/Account');
 const Organization = require('../models/Organization');
+const User = require('../models/User');
+
+// Search & List Organizations (Returns all or filtered by query)
+exports.searchOrganizations = async (request, reply) => {
+  try {
+    const query = request.query.query || '';
+    const filter = {};
+    if (query.trim()) {
+      filter.$or = [
+        { name: { $regex: query.trim(), $options: 'i' } },
+        { 'location.city': { $regex: query.trim(), $options: 'i' } },
+        { facilityType: { $regex: query.trim(), $options: 'i' } }
+      ];
+    }
+
+    const orgs = await Organization.find(filter)
+      .select('name facilityType location workingDays contactNumber managerApprovalStatus')
+      .limit(50)
+      .lean();
+
+    return reply.send({ success: true, organizations: orgs });
+  } catch (err) {
+    return reply.code(500).send({ error: 'Search failed.', details: err.message });
+  }
+};
+
+// Get Pending & Affiliated Doctors for Organization
+exports.getPendingDoctors = async (request, reply) => {
+  try {
+    const { entityId, accountId } = request.user || {};
+
+    let org = null;
+    if (entityId && mongoose.Types.ObjectId.isValid(entityId)) {
+      org = await Organization.findById(entityId);
+    }
+    if (!org && accountId) org = await Organization.findOne({ accountId });
+
+    if (!org) {
+      return reply.code(404).send({ error: 'Organization identity not found.' });
+    }
+
+    const doctors = await User.find({
+      $or: [
+        { 'doctorDetails.affiliateOrganization': org._id },
+        { 'doctorDetails.affiliateOrganization': org.accountId },
+        { _id: { $in: org.doctors || [] } }
+      ]
+    }).select('name email bloodGroup doctorDetails location isDoctor').lean();
+
+    return reply.send({ success: true, doctors, orgId: org._id });
+  } catch (err) {
+    console.error('getPendingDoctors error:', err);
+    return reply.code(500).send({ error: 'Failed to retrieve doctors.', details: err.message });
+  }
+};
+
+// Approve Doctor Affiliation Request
+exports.approveDoctor = async (request, reply) => {
+  try {
+    const { entityId, accountId } = request.user || {};
+    const { doctorId } = request.params || {};
+
+    if (!doctorId || !mongoose.Types.ObjectId.isValid(doctorId)) {
+      return reply.code(400).send({ error: 'Invalid Doctor ID parameter.' });
+    }
+
+    let org = null;
+    if (entityId && mongoose.Types.ObjectId.isValid(entityId)) {
+      org = await Organization.findById(entityId);
+    }
+    if (!org && accountId) org = await Organization.findOne({ accountId });
+
+    const doctor = await User.findById(doctorId);
+    if (!doctor) {
+      return reply.code(404).send({ error: 'Doctor profile not found.' });
+    }
+
+    if (!doctor.doctorDetails) {
+      doctor.doctorDetails = {};
+    }
+
+    doctor.doctorDetails.affiliateOrganizationApprovalStatus = 'approved';
+    if (org) {
+      doctor.doctorDetails.affiliateOrganization = org._id;
+    }
+    doctor.isDoctor = true;
+    await doctor.save();
+
+    if (org) {
+      await Organization.findByIdAndUpdate(org._id, {
+        $addToSet: { doctors: doctor._id }
+      });
+    }
+
+    return reply.send({
+      success: true,
+      message: `Doctor ${doctor.name} affiliated and approved successfully!`,
+      doctor
+    });
+  } catch (err) {
+    console.error('approveDoctor error:', err);
+    return reply.code(500).send({ error: 'Approval failed.', details: err.message });
+  }
+};
+
+// Reject Doctor Affiliation Request
+exports.rejectDoctor = async (request, reply) => {
+  try {
+    const { doctorId } = request.params || {};
+
+    if (!doctorId || !mongoose.Types.ObjectId.isValid(doctorId)) {
+      return reply.code(400).send({ error: 'Invalid Doctor ID parameter.' });
+    }
+
+    const doctor = await User.findById(doctorId);
+    if (!doctor) {
+      return reply.code(404).send({ error: 'Doctor profile not found.' });
+    }
+
+    if (!doctor.doctorDetails) {
+      doctor.doctorDetails = {};
+    }
+
+    doctor.doctorDetails.affiliateOrganizationApprovalStatus = 'rejected';
+    await doctor.save();
+
+    return reply.send({
+      success: true,
+      message: `Doctor ${doctor.name} affiliation request rejected.`,
+      doctor
+    });
+  } catch (err) {
+    console.error('rejectDoctor error:', err);
+    return reply.code(500).send({ error: 'Rejection failed.', details: err.message });
+  }
+};
 
 // Update Organization Profile
 exports.updateOrgProfile = async (request, reply) => {
   const { targetOrgId } = request.params;
-  const { accountId, entityId, role } = request.user; // From JWT payload
+  const { entityId, role } = request.user;
 
-  // Access Control: Must be the organization itself OR an admin
   const isSelf = entityId && entityId.toString() === targetOrgId;
   const isAdmin = role === 'admin';
 
@@ -49,7 +184,6 @@ exports.deleteOrgAccount = async (request, reply) => {
   const { targetOrgId } = request.params;
   const { entityId, role } = request.user;
 
-  // Access Control: Self or Admin
   const isSelf = entityId && entityId.toString() === targetOrgId;
   const isAdmin = role === 'admin';
 
@@ -68,14 +202,12 @@ exports.deleteOrgAccount = async (request, reply) => {
       return reply.code(404).send({ error: 'Organization not found.' });
     }
 
-    // Delete associated parent Account and Organization profile
     await Account.findByIdAndDelete(organization.accountId).session(session);
     await Organization.findByIdAndDelete(targetOrgId).session(session);
 
     await session.commitTransaction();
     session.endSession();
 
-    // Clear cookie if self-deleting
     if (isSelf) {
       reply.clearCookie('token', { path: '/' });
     }
