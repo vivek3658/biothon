@@ -506,12 +506,14 @@ exports.googleLogin = async (request, reply) => {
         } else {
           const base64Url = credential.split('.')[1];
           if (base64Url) {
-            const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-            const jsonPayload = decodeURIComponent(atob(base64).split('').map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join(''));
-            const payload = JSON.parse(jsonPayload);
-            googleEmail = payload.email || googleEmail;
-            googleName = payload.name || googleName;
-            googleSub = payload.sub || googleSub;
+            try {
+              const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+              const jsonString = Buffer.from(base64, 'base64').toString('utf-8');
+              const payload = JSON.parse(jsonString);
+              googleEmail = payload.email || googleEmail;
+              googleName = payload.name || googleName;
+              googleSub = payload.sub || googleSub;
+            } catch (e) {}
           }
         }
       } catch (tokenErr) {
