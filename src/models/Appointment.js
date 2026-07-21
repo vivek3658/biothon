@@ -8,8 +8,8 @@ const AppointmentSchema = new mongoose.Schema({
   reason: { type: String, trim: true, default: '' },
   status: { 
     type: String, 
-    enum: ['requested', 'appointed', 'checked_in', 'waiting', 'in_consultation', 'rejected', 'cancelled', 'completed'], 
-    default: 'appointed' 
+    enum: ['requested', 'approved', 'appointed', 'checked_in', 'waiting', 'in_consultation', 'rejected', 'cancelled', 'completed'], 
+    default: 'approved' 
   },
   rejectionReason: { type: String, trim: true, default: '' },
   appointmentDate: { type: String, required: true, trim: true },
