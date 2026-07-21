@@ -223,6 +223,31 @@ exports.getPrescriptions = async (request, reply) => {
   }
 };
 
+// 2b. Get Single Prescription by ID
+exports.getPrescriptionById = async (request, reply) => {
+  try {
+    const { id } = request.params;
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+      return reply.code(400).send({ error: 'Invalid Prescription ID parameter.' });
+    }
+
+    const prescription = await Prescription.findById(id)
+      .populate('doctorId', 'name isDoctor doctorDetails location')
+      .populate('patientId', 'name bloodGroup location')
+      .populate('organizationId', 'name facilityType location contactNumber')
+      .lean();
+
+    if (!prescription) {
+      return reply.code(404).send({ error: 'Prescription record not found.' });
+    }
+
+    return reply.send({ success: true, prescription });
+  } catch (err) {
+    console.error('getPrescriptionById error:', err);
+    return reply.code(500).send({ error: 'Failed to retrieve prescription.', details: err.message });
+  }
+};
+
 // 3. Get Prescription Version History
 exports.getPrescriptionHistory = async (request, reply) => {
   try {

@@ -13,6 +13,9 @@ async function prescriptionRoutes(fastify, options) {
   fastify.get('/prescription', { preHandler: [authenticate] }, prescriptionController.getPrescriptions);
   fastify.get('/prescriptions', { preHandler: [authenticate] }, prescriptionController.getPrescriptions);
   
+  fastify.get('/prescription/:id', { preHandler: [authenticate] }, prescriptionController.getPrescriptionById);
+  fastify.get('/prescriptions/:id', { preHandler: [authenticate] }, prescriptionController.getPrescriptionById);
+  
   fastify.get('/prescription/:id/history', { preHandler: [authenticate] }, prescriptionController.getPrescriptionHistory);
   fastify.get('/prescriptions/:id/history', { preHandler: [authenticate] }, prescriptionController.getPrescriptionHistory);
   
