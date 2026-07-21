@@ -18,12 +18,27 @@ const buildApp = () => {
     pluginTimeout: 60000 
   });
 
-  // Add CORS headers hook for Vercel deployment & frontend origins
+  // Register @fastify/cors for Vercel cross-origin preflight requests
+  fastify.register(require('@fastify/cors'), {
+    origin: (origin, cb) => {
+      // Allow Vercel frontend deployments, local dev, or no-origin
+      if (!origin || origin.includes('vercel.app') || origin.includes('localhost') || origin.includes('127.0.0.1')) {
+        cb(null, true);
+        return;
+      }
+      cb(null, true);
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization', 'X-CSRF-Token']
+  });
+
+  // Ensure OPTIONS preflight requests receive 200 OK
   fastify.addHook('onRequest', async (request, reply) => {
-    const origin = request.headers.origin || '*';
+    const origin = request.headers.origin || 'https://arogyax-client.vercel.app';
     reply.header('Access-Control-Allow-Origin', origin);
     reply.header('Access-Control-Allow-Credentials', 'true');
-    reply.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+    reply.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, X-CSRF-Token');
     reply.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
 
     if (request.method === 'OPTIONS') {
