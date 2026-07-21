@@ -4,20 +4,29 @@ const mongoose = require('mongoose');
 
 const dbConnector = async (fastify, options) => {
   try {
+    // Reuse existing active connection in serverless environment
+    if (mongoose.connection.readyState >= 1) {
+      if (!fastify.hasDecorator('mongoose')) {
+        fastify.decorate('mongoose', mongoose);
+      }
+      return;
+    }
+
     const mongoUri = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/arogyax';
     
-    // Connect to MongoDB with connection timeouts
+    // Connect to MongoDB
     await mongoose.connect(mongoUri, {
-      serverSelectionTimeoutMS: 30000,
-      connectTimeoutMS: 30000
+      serverSelectionTimeoutMS: 15000,
+      connectTimeoutMS: 15000
     });
     
-    // Share mongoose with fastify instance
-    fastify.decorate('mongoose', mongoose);
+    if (!fastify.hasDecorator('mongoose')) {
+      fastify.decorate('mongoose', mongoose);
+    }
     console.log('MongoDB connected successfully!');
   } catch (error) {
-    console.error('Database connection failed:', error);
-    process.exit(1);
+    console.error('Database connection failed:', error.message);
+    throw new Error(`Database connection failed: ${error.message}. Please configure MONGO_URI in Vercel project environment variables.`);
   }
 };
 

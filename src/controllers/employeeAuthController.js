@@ -1,5 +1,5 @@
 const Manager = require('../models/Manager');
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs');
 
 // controllers/employeeAuthController.js
 exports.getMe = async (request, reply) => {

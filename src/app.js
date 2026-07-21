@@ -83,15 +83,17 @@ const buildApp = () => {
   fastify.register(require('./routes/appointmentRoutes'));
   fastify.register(require('./routes/pharmacyRoutes'));
 
-  // Trigger auto-seeding on startup
-  setTimeout(async () => {
-    try {
-      const { seedDatabase } = require('./utils/databaseSeeder');
-      await seedDatabase();
-    } catch (e) {
-      console.warn('Auto-seed check note:', e.message);
-    }
-  }, 3000);
+  // Trigger auto-seeding on startup only in local environment
+  if (!process.env.VERCEL && process.env.NODE_ENV !== 'production') {
+    setTimeout(async () => {
+      try {
+        const { seedDatabase } = require('./utils/databaseSeeder');
+        await seedDatabase();
+      } catch (e) {
+        console.warn('Auto-seed check note:', e.message);
+      }
+    }, 3000);
+  }
   
   // Health check
   fastify.get('/health', async (request, reply) => {
