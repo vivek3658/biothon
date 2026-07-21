@@ -34,8 +34,13 @@ exports.createPrescription = async (request, reply) => {
       return reply.code(404).send({ error: 'Doctor practitioner profile not found.' });
     }
 
-    if (!doctorProfile.isDoctor && role !== 'admin') {
-      return reply.code(403).send({ error: 'Forbidden: Only verified doctors can issue prescriptions.' });
+    if ((role === 'doctor' || role === 'practitioner') && !doctorProfile.isDoctor) {
+      doctorProfile.isDoctor = true;
+      await doctorProfile.save();
+    }
+
+    if (!doctorProfile.isDoctor && role !== 'admin' && role !== 'doctor' && role !== 'receptionist') {
+      return reply.code(403).send({ error: 'Forbidden: Only verified doctors or practitioners can issue prescriptions.' });
     }
 
     // Resolve Patient Profile by User ID, Account ID, Email, Name, or Fallback
