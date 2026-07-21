@@ -5,6 +5,9 @@ async function authRoutes(fastify, options) {
   // Step 1: Base Account Creation
   fastify.post('/auth/create-account', authController.createAccount);
 
+  // Unified Login Endpoint (Patient, Doctor, Hospital, Clinic, Lab, Admin, Manager)
+  fastify.post('/auth/login', authController.unifiedLogin);
+
   // Google Authentication & Onboarding
   fastify.post('/auth/google', authController.googleLogin);
 

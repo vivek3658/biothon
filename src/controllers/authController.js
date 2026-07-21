@@ -13,6 +13,162 @@ const COOKIE_OPTIONS = {
   secure: process.env.NODE_ENV === 'production'
 };
 
+// 0. Unified Login for ALL User Roles (Patient, Doctor, Hospital, Clinic, Lab, Admin, Manager)
+exports.unifiedLogin = async (request, reply) => {
+  try {
+    const { email, username, password } = request.body || {};
+    const identifier = (email || username || '').toLowerCase().trim();
+
+    if (!identifier || !password) {
+      return reply.code(400).send({ error: 'Email/Username and password are required.' });
+    }
+
+    // 1. Check Admin Credentials
+    const envAdminUser = (process.env.ADMIN_USERNAME || 'admin').toLowerCase().trim();
+    const envAdminPass = process.env.ADMIN_PASSWORD || 'admin123';
+
+    if (identifier === envAdminUser && password === envAdminPass) {
+      const payload = { username: envAdminUser, role: 'admin', entityModel: 'Employee' };
+      const token = signToken(request, payload);
+      setTokenCookie(reply, token);
+      return reply.send({
+        success: true,
+        message: 'Admin login successful.',
+        token,
+        role: 'admin',
+        entityModel: 'Employee',
+        identity: { id: null, username: envAdminUser, role: 'admin' }
+      });
+    }
+
+    // 2. Check Manager Credentials
+    const Manager = require('../models/Manager');
+    const manager = await Manager.findOne({
+      $or: [
+        { username: identifier },
+        { email: identifier }
+      ]
+    });
+
+    if (manager) {
+      const isMatch = await bcrypt.compare(password, manager.password);
+      if (isMatch) {
+        const payload = { id: manager._id, username: manager.username, role: 'manager', entityModel: 'Employee' };
+        const token = signToken(request, payload);
+        setTokenCookie(reply, token);
+        return reply.send({
+          success: true,
+          message: 'Manager login successful.',
+          token,
+          role: 'manager',
+          entityModel: 'Employee',
+          identity: { id: manager._id, username: manager.username, role: 'manager' }
+        });
+      }
+    }
+
+    // 3. Check Account (User or Organization)
+    const account = await Account.findOne({ email: identifier });
+    if (!account) {
+      return reply.code(401).send({ error: 'No account found with this email/username. Please register.' });
+    }
+
+    const isMatch = await bcrypt.compare(password, account.password);
+    if (!isMatch) {
+      return reply.code(401).send({ error: 'Invalid password. Please check your credentials.' });
+    }
+
+    // 3a. Organization Account
+    if (account.entityModel === 'Organization') {
+      let organization = await Organization.findOne({ accountId: account._id });
+      if (!organization) {
+        organization = new Organization({
+          accountId: account._id,
+          name: identifier.split('@')[0] || 'Healthcare Facility',
+          facilityType: account.role || 'hospital',
+          contactNumber: '+91 9876543210',
+          location: { buildingNo: '', floorNo: 0, landmark: '', city: 'New Delhi', state: 'Delhi', pincode: '110001' },
+          coordinates: [77.2090, 28.6139],
+          organizationCertificateNo: `REG-${Date.now()}`,
+          organizationCertificateUrl: 'https://example.com/cert.pdf',
+          verificationStatus: 'approved'
+        });
+        await organization.save();
+        account.entityId = organization._id;
+        await account.save();
+      }
+
+      const role = account.role || organization.facilityType || 'hospital';
+      const token = signToken(request, {
+        accountId: account._id,
+        entityId: organization._id,
+        entityModel: 'Organization',
+        role
+      });
+
+      setTokenCookie(reply, token);
+
+      return reply.send({
+        success: true,
+        message: 'Organization login successful.',
+        token,
+        accountId: account._id,
+        entityId: organization._id,
+        role,
+        entityModel: 'Organization',
+        account: {
+          accountId: account._id,
+          email: account.email,
+          role,
+          entityModel: 'Organization',
+          profile: organization
+        }
+      });
+    }
+
+    // 3b. User Account (Patient or Doctor)
+    let userProfile = await User.findOne({ accountId: account._id });
+    if (!userProfile) {
+      userProfile = new User({
+        accountId: account._id,
+        name: identifier.split('@')[0] || 'User',
+        isDoctor: account.role === 'doctor',
+        location: { roomNo: '', floorNo: 0, landmark: '', city: 'New Delhi', state: 'Delhi', pincode: '110001' },
+        coordinates: [77.2090, 28.6139],
+        bloodGroup: 'A+'
+      });
+      await userProfile.save();
+      account.entityId = userProfile._id;
+      await account.save();
+    }
+
+    const role = account.role || (userProfile.isDoctor ? 'doctor' : 'patient');
+    const token = signToken(request, {
+      accountId: account._id,
+      entityId: userProfile._id,
+      entityModel: 'User',
+      role
+    });
+
+    setTokenCookie(reply, token);
+
+    return reply.send({
+      success: true,
+      message: 'User login successful.',
+      token,
+      accountId: account._id,
+      entityId: userProfile._id,
+      role,
+      entityModel: 'User',
+      account,
+      userProfile
+    });
+  } catch (err) {
+    console.error('unifiedLogin error:', err);
+    return reply.code(500).send({ error: 'Login failed due to a server error.', details: err.message });
+  }
+};
+
 // 1. Create Base Account (or Resume Profile Completion)
 exports.createAccount = async (request, reply) => {
   try {
