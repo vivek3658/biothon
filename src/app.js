@@ -18,17 +18,16 @@ const buildApp = () => {
     pluginTimeout: 60000 
   });
 
-  // Add CORS headers hook for local frontend dev server
+  // Add CORS headers hook for Vercel deployment & frontend origins
   fastify.addHook('onRequest', async (request, reply) => {
-    const origin = request.headers.origin;
-    if (origin) {
-      reply.header('Access-Control-Allow-Origin', origin);
-      reply.header('Access-Control-Allow-Credentials', 'true');
-      reply.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-      reply.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-    }
+    const origin = request.headers.origin || '*';
+    reply.header('Access-Control-Allow-Origin', origin);
+    reply.header('Access-Control-Allow-Credentials', 'true');
+    reply.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+    reply.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+
     if (request.method === 'OPTIONS') {
-      return reply.code(204).send();
+      return reply.code(200).send('OK');
     }
   });
 
