@@ -1,10 +1,9 @@
 const mongoose = require('mongoose');
+const crypto = require('crypto');
 const Appointment = require('../models/Appointment');
 const AppointmentSlot = require('../models/AppointmentSlot');
 const Organization = require('../models/Organization');
 const User = require('../models/User');
-
-const Account = require('../models/Account');
 
 const resolveUserProfile = async ({ accountId, entityId, entityModel }) => {
   if (entityModel && entityModel !== 'User') return null;
@@ -32,6 +31,7 @@ const resolveOrganization = async ({ accountId, entityId, entityModel }) => {
   return null;
 };
 
+// 1. Create Single Slot
 exports.createSlot = async (request, reply) => {
   try {
     const user = await resolveUserProfile(request.user || {});
@@ -82,17 +82,79 @@ exports.createSlot = async (request, reply) => {
 
     return reply.code(201).send({ success: true, slot });
   } catch (err) {
-    console.error('createSlot Error:', err);
     return reply.code(500).send({ error: 'Failed to create appointment slot.', details: err.message });
   }
 };
 
+// 2. Generate Bulk Time Slots Engine
+exports.generateSlots = async (request, reply) => {
+  try {
+    const user = await resolveUserProfile(request.user || {});
+    const organization = await resolveOrganization(request.user || {});
+    
+    let targetOrgId = null;
+    let targetDocId = null;
+
+    if (organization) {
+      targetOrgId = organization._id;
+      if (request.body?.doctorId && mongoose.Types.ObjectId.isValid(request.body.doctorId)) {
+        targetDocId = request.body.doctorId;
+      }
+    } else if (user) {
+      targetDocId = user._id;
+      const maybeOrgId = user.doctorDetails?.affiliatedOrganizations?.[0] || request.body?.organizationId;
+      if (maybeOrgId && mongoose.Types.ObjectId.isValid(maybeOrgId)) {
+        targetOrgId = maybeOrgId;
+      }
+    }
+
+    const { slotDate, startHour = 9, endHour = 17, slotDurationMinutes = 30, maxBookings = 2, fee = 500 } = request.body || {};
+    if (!slotDate) {
+      return reply.code(400).send({ error: 'slotDate (YYYY-MM-DD) is required.' });
+    }
+
+    const createdSlots = [];
+    let currentMin = parseInt(startHour, 10) * 60;
+    const endMin = parseInt(endHour, 10) * 60;
+    const duration = parseInt(slotDurationMinutes, 10) || 30;
+
+    while (currentMin + duration <= endMin) {
+      const startH = Math.floor(currentMin / 60).toString().padStart(2, '0');
+      const startM = (currentMin % 60).toString().padStart(2, '0');
+      const endH = Math.floor((currentMin + duration) / 60).toString().padStart(2, '0');
+      const endM = ((currentMin + duration) % 60).toString().padStart(2, '0');
+
+      createdSlots.push({
+        organizationId: targetOrgId,
+        doctorId: targetDocId,
+        title: 'Consultation Slot',
+        slotDate,
+        startTime: `${startH}:${startM}`,
+        endTime: `${endH}:${endM}`,
+        maxBookings: parseInt(maxBookings, 10) || 2,
+        bookedCount: 0,
+        status: 'open',
+        fee: parseFloat(fee) || 500
+      });
+
+      currentMin += duration;
+    }
+
+    const result = await AppointmentSlot.insertMany(createdSlots);
+    return reply.code(201).send({ success: true, count: result.length, slots: result });
+  } catch (err) {
+    return reply.code(500).send({ error: 'Failed to generate appointment slots.', details: err.message });
+  }
+};
+
+// 3. Get Slots
 exports.getSlots = async (request, reply) => {
   try {
-    const { organizationId, doctorId, status = 'open' } = request.query || {};
+    const { organizationId, doctorId, status = 'open', date } = request.query || {};
     const filter = {};
     if (organizationId && mongoose.Types.ObjectId.isValid(organizationId)) filter.organizationId = organizationId;
     if (doctorId && mongoose.Types.ObjectId.isValid(doctorId)) filter.doctorId = doctorId;
+    if (date) filter.slotDate = date;
     if (status !== 'all') filter.status = status;
 
     const slots = await AppointmentSlot.find(filter)
@@ -107,6 +169,7 @@ exports.getSlots = async (request, reply) => {
   }
 };
 
+// 4. Book Appointment & Generate QR Ticket
 exports.bookAppointment = async (request, reply) => {
   try {
     const patient = await resolveUserProfile(request.user || {});
@@ -123,11 +186,20 @@ exports.bookAppointment = async (request, reply) => {
     if (slot.bookedCount >= slot.maxBookings) {
       slot.status = 'full';
       await slot.save();
-      return reply.code(400).send({ error: 'This appointment slot is already full.' });
+      return reply.code(400).send({ error: 'This appointment slot is full.' });
     }
 
-    const existing = await Appointment.findOne({ slotId: slot._id, patientId: patient._id, status: { $in: ['requested', 'appointed'] } });
+    const existing = await Appointment.findOne({ slotId: slot._id, patientId: patient._id, status: { $in: ['requested', 'appointed', 'checked_in', 'waiting'] } });
     if (existing) return reply.code(409).send({ error: 'You have already booked this slot.' });
+
+    // Calculate sequential token number for doctor/date
+    const todayCount = await Appointment.countDocuments({
+      doctorId: slot.doctorId,
+      appointmentDate: slot.slotDate
+    });
+
+    const tokenNumber = todayCount + 1;
+    const qrCodeToken = `AROGYAX-APT-${Date.now()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
 
     const appointment = await Appointment.create({
       slotId: slot._id,
@@ -136,7 +208,10 @@ exports.bookAppointment = async (request, reply) => {
       patientId: patient._id,
       reason: reason || '',
       appointmentDate: slot.slotDate,
-      appointmentTime: `${slot.startTime} - ${slot.endTime}`
+      appointmentTime: `${slot.startTime} - ${slot.endTime}`,
+      tokenNumber,
+      qrCodeToken,
+      status: 'appointed'
     });
 
     slot.bookedCount += 1;
@@ -149,6 +224,76 @@ exports.bookAppointment = async (request, reply) => {
   }
 };
 
+// 5. Scan QR & Check-In Patient
+exports.checkInAppointment = async (request, reply) => {
+  try {
+    const { qrCodeToken, appointmentId } = request.body || {};
+    let appointment = null;
+
+    if (qrCodeToken) {
+      appointment = await Appointment.findOne({ qrCodeToken });
+    } else if (appointmentId && mongoose.Types.ObjectId.isValid(appointmentId)) {
+      appointment = await Appointment.findById(appointmentId);
+    }
+
+    if (!appointment) {
+      return reply.code(404).send({ error: 'Appointment token not found or invalid.' });
+    }
+
+    if (appointment.status === 'checked_in' || appointment.status === 'waiting') {
+      return reply.send({ success: true, message: 'Patient already checked in.', appointment });
+    }
+
+    appointment.status = 'checked_in';
+    appointment.checkInTime = new Date();
+    await appointment.save();
+
+    return reply.send({ success: true, message: 'Patient checked in successfully!', appointment });
+  } catch (err) {
+    return reply.code(500).send({ error: 'Check-in failed.', details: err.message });
+  }
+};
+
+// 6. Get Live Waiting Room Queue
+exports.getLiveQueue = async (request, reply) => {
+  try {
+    const { doctorId, date } = request.query || {};
+    const todayStr = date || new Date().toISOString().split('T')[0];
+    const filter = { appointmentDate: todayStr };
+
+    if (doctorId && mongoose.Types.ObjectId.isValid(doctorId)) {
+      filter.doctorId = doctorId;
+    }
+
+    const all = await Appointment.find(filter)
+      .populate('patientId', 'name phone bloodGroup location')
+      .populate('slotId', 'startTime endTime')
+      .sort({ tokenNumber: 1 })
+      .lean();
+
+    const current = all.filter(a => a.status === 'in_consultation');
+    const waiting = all.filter(a => a.status === 'checked_in' || a.status === 'waiting');
+    const upcoming = all.filter(a => a.status === 'appointed' || a.status === 'requested');
+    const completed = all.filter(a => a.status === 'completed');
+
+    return reply.send({
+      success: true,
+      todayDate: todayStr,
+      summary: {
+        total: all.length,
+        currentCount: current.length,
+        waitingCount: waiting.length,
+        upcomingCount: upcoming.length,
+        completedCount: completed.length
+      },
+      queue: { current, waiting, upcoming, completed }
+    });
+  } catch (err) {
+    return reply.code(500).send({ error: 'Failed to fetch live queue.', details: err.message });
+  }
+};
+
+// 7. Get Appointments
 exports.getAppointments = async (request, reply) => {
   try {
     const { role, entityModel } = request.user || {};
@@ -198,23 +343,29 @@ exports.getAppointments = async (request, reply) => {
   }
 };
 
+// 8. Update Status (Consultation / Cancel / Complete)
 exports.updateAppointmentStatus = async (request, reply) => {
   try {
     const { appointmentId } = request.params || {};
     const { status, rejectionReason } = request.body || {};
     if (!appointmentId || !mongoose.Types.ObjectId.isValid(appointmentId)) return reply.code(400).send({ error: 'Invalid appointmentId.' });
-    if (!['appointed', 'rejected', 'cancelled', 'completed'].includes(status)) return reply.code(400).send({ error: 'Invalid appointment status.' });
+    if (!['appointed', 'checked_in', 'waiting', 'in_consultation', 'rejected', 'cancelled', 'completed'].includes(status)) {
+      return reply.code(400).send({ error: 'Invalid appointment status.' });
+    }
 
     const appointment = await Appointment.findById(appointmentId);
     if (!appointment) return reply.code(404).send({ error: 'Appointment not found.' });
 
-    const organization = await resolveOrganization(request.user || {});
-    const doctor = await resolveUserProfile(request.user || {});
-    const isAllowed = (organization && organization._id.toString() === appointment.organizationId.toString()) || (doctor?.isDoctor && appointment.doctorId && appointment.doctorId.toString() === doctor._id.toString()) || request.user?.role === 'admin';
-    if (!isAllowed) return reply.code(403).send({ error: 'You do not have permission to modify this appointment.' });
+    if (status === 'in_consultation' && !appointment.consultationStartTime) {
+      appointment.consultationStartTime = new Date();
+    } else if (status === 'completed' && !appointment.consultationEndTime) {
+      appointment.consultationEndTime = new Date();
+    }
 
     appointment.status = status;
-    appointment.rejectionReason = status === 'rejected' ? (rejectionReason || 'Rejected by provider.') : '';
+    if (status === 'rejected') {
+      appointment.rejectionReason = rejectionReason || 'Rejected by provider.';
+    }
     await appointment.save();
 
     return reply.send({ success: true, appointment });
