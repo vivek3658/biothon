@@ -343,13 +343,13 @@ exports.getAppointments = async (request, reply) => {
   }
 };
 
-// 8. Update Status (Consultation / Cancel / Complete)
+// 8. Update Status (Approved / Consultation / Cancel / Complete / Reject)
 exports.updateAppointmentStatus = async (request, reply) => {
   try {
     const { appointmentId } = request.params || {};
     const { status, rejectionReason } = request.body || {};
     if (!appointmentId || !mongoose.Types.ObjectId.isValid(appointmentId)) return reply.code(400).send({ error: 'Invalid appointmentId.' });
-    if (!['appointed', 'checked_in', 'waiting', 'in_consultation', 'rejected', 'cancelled', 'completed'].includes(status)) {
+    if (!['requested', 'approved', 'appointed', 'checked_in', 'waiting', 'in_consultation', 'rejected', 'cancelled', 'completed'].includes(status)) {
       return reply.code(400).send({ error: 'Invalid appointment status.' });
     }
 
@@ -371,5 +371,52 @@ exports.updateAppointmentStatus = async (request, reply) => {
     return reply.send({ success: true, appointment });
   } catch (err) {
     return reply.code(500).send({ error: 'Failed to update appointment.', details: err.message });
+  }
+};
+
+// 9. Full Update Appointment Endpoint
+exports.updateAppointment = async (request, reply) => {
+  try {
+    const { appointmentId } = request.params || {};
+    if (!appointmentId || !mongoose.Types.ObjectId.isValid(appointmentId)) return reply.code(400).send({ error: 'Invalid appointmentId.' });
+
+    const appointment = await Appointment.findById(appointmentId);
+    if (!appointment) return reply.code(404).send({ error: 'Appointment not found.' });
+
+    const { appointmentDate, notes, status, rejectionReason } = request.body || {};
+
+    if (appointmentDate) appointment.appointmentDate = appointmentDate;
+    if (notes !== undefined) appointment.notes = notes;
+    if (status && ['requested', 'approved', 'appointed', 'checked_in', 'waiting', 'in_consultation', 'rejected', 'cancelled', 'completed'].includes(status)) {
+      appointment.status = status;
+    }
+    if (rejectionReason !== undefined) appointment.rejectionReason = rejectionReason;
+
+    await appointment.save();
+
+    const updated = await Appointment.findById(appointmentId)
+      .populate('organizationId', 'name facilityType location contactNumber')
+      .populate('doctorId', 'name doctorDetails')
+      .populate('patientId', 'name bloodGroup location')
+      .populate('slotId', 'slotDate startTime endTime consultationMode fee');
+
+    return reply.send({ success: true, appointment: updated });
+  } catch (err) {
+    return reply.code(500).send({ error: 'Failed to update appointment details.', details: err.message });
+  }
+};
+
+// 10. Delete / Cancel Appointment Endpoint
+exports.deleteAppointment = async (request, reply) => {
+  try {
+    const { appointmentId } = request.params || {};
+    if (!appointmentId || !mongoose.Types.ObjectId.isValid(appointmentId)) return reply.code(400).send({ error: 'Invalid appointmentId.' });
+
+    const appointment = await Appointment.findByIdAndDelete(appointmentId);
+    if (!appointment) return reply.code(404).send({ error: 'Appointment not found or already deleted.' });
+
+    return reply.send({ success: true, message: 'Appointment deleted successfully.', deletedId: appointmentId });
+  } catch (err) {
+    return reply.code(500).send({ error: 'Failed to delete appointment.', details: err.message });
   }
 };

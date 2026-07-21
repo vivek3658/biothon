@@ -11,6 +11,8 @@ async function appointmentRoutes(fastify) {
   fastify.post('/appointments', { preHandler: [authenticate] }, appointmentController.bookAppointment);
   fastify.get('/appointments', { preHandler: [authenticate] }, appointmentController.getAppointments);
   fastify.patch('/appointments/:appointmentId/status', { preHandler: [authenticate] }, appointmentController.updateAppointmentStatus);
+  fastify.put('/appointments/:appointmentId', { preHandler: [authenticate] }, appointmentController.updateAppointment);
+  fastify.delete('/appointments/:appointmentId', { preHandler: [authenticate] }, appointmentController.deleteAppointment);
 }
 
 module.exports = appointmentRoutes;
