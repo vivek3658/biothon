@@ -2,6 +2,8 @@ const bcrypt = require('bcrypt');
 const mongoose = require('mongoose');
 const Account = require('../models/Account');
 const Organization = require('../models/Organization');
+const User = require('../models/User');
+const { OAuth2Client } = require('google-auth-library');
 
 const COOKIE_OPTIONS = {
   path: '/',
@@ -42,7 +44,8 @@ exports.createAccount = async (request, reply) => {
           token
         });
       }
-      return reply.code(400).send({ error: 'An account with this email already exists.' });
+      const existingType = existing.entityModel === 'Organization' ? 'organization' : 'user/patient';
+      return reply.code(400).send({ error: `An ${existingType} account with this email already exists. Please sign in instead.` });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -279,10 +282,14 @@ exports.getMe = async (request, reply) => {
       return reply.code(404).send({ error: 'Account identity not found.' });
     }
 
+    if (account.entityModel !== 'Organization') {
+      return reply.code(403).send({ error: 'Account is registered as a User, not an Organization.' });
+    }
+
     let organization = await Organization.findOne({ accountId: account._id });
 
     // Auto-repair missing profile
-    if (!organization && account.entityModel === 'Organization') {
+    if (!organization) {
       organization = new Organization({
         accountId: account._id,
         name: account.email ? account.email.split('@')[0] : 'Healthcare Facility',
@@ -304,13 +311,181 @@ exports.getMe = async (request, reply) => {
       account: {
         accountId: account._id,
         email: account.email,
-        role: account.role,
-        entityModel: account.entityModel,
+        role: account.role || organization.facilityType || 'hospital',
+        entityModel: 'Organization',
         profile: organization
       }
     });
   } catch (err) {
     console.error('getMe error:', err);
     return reply.code(500).send({ error: 'Failed to retrieve identity payload.', details: err.message });
+  }
+};
+
+// 6. Google OAuth Login / Onboarding
+exports.googleLogin = async (request, reply) => {
+  try {
+    const { credential, email: bodyEmail, name: bodyName, googleId: bodyGoogleId, portal } = request.body || {};
+
+    let googleEmail = bodyEmail;
+    let googleName = bodyName;
+    let googleSub = bodyGoogleId;
+
+    if (credential) {
+      try {
+        const clientId = process.env.GOOGLE_CLIENT_ID;
+        if (clientId && clientId !== 'your_google_client_id_here') {
+          const client = new OAuth2Client(clientId);
+          const ticket = await client.verifyIdToken({
+            idToken: credential,
+            audience: clientId
+          });
+          const payload = ticket.getPayload();
+          if (payload) {
+            googleEmail = payload.email || googleEmail;
+            googleName = payload.name || googleName;
+            googleSub = payload.sub || googleSub;
+          }
+        } else {
+          const base64Url = credential.split('.')[1];
+          if (base64Url) {
+            const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+            const jsonPayload = decodeURIComponent(atob(base64).split('').map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join(''));
+            const payload = JSON.parse(jsonPayload);
+            googleEmail = payload.email || googleEmail;
+            googleName = payload.name || googleName;
+            googleSub = payload.sub || googleSub;
+          }
+        }
+      } catch (tokenErr) {
+        console.warn('Google Token verification note:', tokenErr.message);
+      }
+    }
+
+    if (!googleEmail) {
+      return reply.code(400).send({ error: 'Google authentication failed: Email is required.' });
+    }
+
+    const cleanEmail = googleEmail.toLowerCase().trim();
+    const targetEntityModel = portal === 'org' ? 'Organization' : 'User';
+
+    let account = await Account.findOne({
+      $or: [
+        { email: cleanEmail },
+        ...(googleSub ? [{ googleId: googleSub }] : [])
+      ]
+    });
+
+    if (!account) {
+      const randomPassword = await bcrypt.hash(`google_${Date.now()}_${Math.random()}`, 10);
+      account = new Account({
+        email: cleanEmail,
+        password: randomPassword,
+        googleId: googleSub || `google_${Date.now()}`,
+        authProvider: 'google',
+        role: targetEntityModel === 'Organization' ? 'hospital' : 'patient',
+        entityModel: targetEntityModel
+      });
+      await account.save();
+    } else {
+      if (!account.googleId && googleSub) {
+        account.googleId = googleSub;
+        account.authProvider = 'google';
+        await account.save();
+      }
+    }
+
+    if (account.entityModel === 'Organization') {
+      const organization = await Organization.findOne({ accountId: account._id });
+      if (!organization) {
+        const pendingToken = request.server.jwt.sign({
+          accountId: account._id,
+          entityModel: 'Organization',
+          role: account.role || 'hospital',
+          onboardingStatus: 'pending_profile'
+        });
+        reply.setCookie('token', pendingToken, COOKIE_OPTIONS);
+        return reply.send({
+          success: true,
+          message: 'Google login verified. Please complete your organization profile.',
+          needsProfile: true,
+          portal: 'org',
+          accountId: account._id,
+          email: account.email,
+          name: googleName || cleanEmail.split('@')[0],
+          entityModel: 'Organization',
+          token: pendingToken
+        });
+      }
+
+      const token = request.server.jwt.sign({
+        accountId: account._id,
+        entityId: organization._id,
+        entityModel: 'Organization',
+        role: account.role || organization.facilityType || 'hospital'
+      });
+      reply.setCookie('token', token, COOKIE_OPTIONS);
+      return reply.send({
+        success: true,
+        message: 'Google Organization login successful.',
+        needsProfile: false,
+        token,
+        accountId: account._id,
+        entityId: organization._id,
+        role: account.role || organization.facilityType || 'hospital',
+        account: {
+          accountId: account._id,
+          email: account.email,
+          role: account.role || organization.facilityType || 'hospital',
+          entityModel: 'Organization',
+          profile: organization
+        }
+      });
+    } else {
+      const userProfile = await User.findOne({ accountId: account._id });
+      if (!userProfile) {
+        const pendingToken = request.server.jwt.sign({
+          accountId: account._id,
+          entityModel: 'User',
+          role: account.role || 'patient',
+          onboardingStatus: 'pending_profile'
+        });
+        reply.setCookie('token', pendingToken, COOKIE_OPTIONS);
+        return reply.send({
+          success: true,
+          message: 'Google login verified. Please complete your user profile.',
+          needsProfile: true,
+          portal: 'user',
+          accountId: account._id,
+          email: account.email,
+          name: googleName || cleanEmail.split('@')[0],
+          entityModel: 'User',
+          token: pendingToken
+        });
+      }
+
+      const role = account.role || (userProfile.isDoctor ? 'doctor' : 'patient');
+      const token = request.server.jwt.sign({
+        accountId: account._id,
+        entityId: userProfile._id,
+        entityModel: 'User',
+        role
+      });
+      reply.setCookie('token', token, COOKIE_OPTIONS);
+      return reply.send({
+        success: true,
+        message: 'Google User login successful.',
+        needsProfile: false,
+        token,
+        accountId: account._id,
+        entityId: userProfile._id,
+        role,
+        account,
+        userProfile
+      });
+    }
+  } catch (err) {
+    console.error('googleLogin error:', err);
+    return reply.code(500).send({ error: 'Google login failed due to a server error.', details: err.message });
   }
 };

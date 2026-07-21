@@ -1,5 +1,21 @@
 // controllers/medicineController.js
 const Medicine = require('../models/Medicine');
+const medicineSeedData = require('../utils/medicineSeedData');
+
+const ensureSeededCatalog = async () => {
+  try {
+    const count = await Medicine.countDocuments();
+    if (count < 100) {
+      for (const item of medicineSeedData) {
+        await Medicine.updateOne(
+          { medicineName: item.medicineName },
+          { $setOnInsert: item },
+          { upsert: true }
+        );
+      }
+    }
+  } catch (e) {}
+};
 
 // 1. Create New Medicine (Admin Only)
 exports.createMedicine = async (request, reply) => {
@@ -62,6 +78,8 @@ exports.createMedicine = async (request, reply) => {
 // 2. Get All Medicines (Admin & Doctor Search with Pagination & Category Filtering)
 exports.getAllMedicines = async (request, reply) => {
   try {
+    await ensureSeededCatalog();
+
     const page = parseInt(request.query.page, 10) || 1;
     const limit = parseInt(request.query.limit, 10) || 20;
     const search = request.query.search || '';
@@ -197,5 +215,30 @@ exports.deleteMedicine = async (request, reply) => {
   } catch (err) {
     console.error('deleteMedicine error:', err);
     return reply.code(500).send({ error: 'Failed to delete medicine.', details: err.message });
+  }
+};
+
+// 6. Seed 100 Master Medicine Records (Admin Only / On-Demand)
+exports.seedMedicines = async (request, reply) => {
+  try {
+    let insertedCount = 0;
+    for (const item of medicineSeedData) {
+      const res = await Medicine.updateOne(
+        { medicineName: item.medicineName },
+        { $setOnInsert: item },
+        { upsert: true }
+      );
+      if (res.upsertedCount > 0) insertedCount++;
+    }
+    const total = await Medicine.countDocuments();
+    return reply.send({
+      success: true,
+      message: `Master Medicine Catalog initialized with 100 records!`,
+      newRecordsInserted: insertedCount,
+      totalCatalogSize: total
+    });
+  } catch (err) {
+    console.error('seedMedicines error:', err);
+    return reply.code(500).send({ error: 'Failed to seed medicine catalog.', details: err.message });
   }
 };

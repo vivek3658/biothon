@@ -3,9 +3,8 @@ const Manager = require('../models/Manager');
 const bcrypt = require('bcrypt');
 
 exports.createManager = async (request, reply) => {
-  const { username, password, name, email } = request.body;
+  const { username, password, name, email } = request.body || {};
 
-  // Strict Validation Constraint
   if (!username || !password || username.trim().length === 0 || password.length < 6 || password.length > 20) {
     return reply.code(400).send({ error: 'Bad Request: Username required, password must be between 6 and 20 characters' });
   }
@@ -28,7 +27,6 @@ exports.createManager = async (request, reply) => {
 };
 
 exports.getAllManagers = async (request, reply) => {
-  // Query parameters parsing with explicit validation fallback
   const page = parseInt(request.query.page, 10) || 1;
   const limit = 10; 
   const skip = (page - 1) * limit;
@@ -100,4 +98,10 @@ exports.deleteManager = async (request, reply) => {
     return reply.code(404).send({ error: 'Not Found: Unable to delete non-existent Manager' });
   }
   return { success: true, message: 'Manager deleted successfully' };
+};
+
+exports.seedAllRecords = async (request, reply) => {
+  const { seedDatabase } = require('../utils/databaseSeeder');
+  await seedDatabase();
+  return reply.send({ success: true, message: 'Seeded 10 Patients, 10 Doctors, 10 Hospitals, 10 Clinics, and 10 Laboratories near Ahmedabad.' });
 };

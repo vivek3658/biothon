@@ -23,6 +23,7 @@ async function userRoutes(fastify, options) {
   // Managed Profiles & Family Member Workflows
   fastify.get('/user/search', { preHandler: [authenticate] }, userController.searchUserByEmail);
   fastify.post('/user/managed-profiles/request', { preHandler: [authenticate] }, userController.sendManagedProfileRequest);
+  fastify.delete('/user/managed-profiles/:targetUserId', { preHandler: [authenticate] }, userController.removeManagedProfile);
   fastify.patch('/user/managed-profiles/requests/:requestId', { preHandler: [authenticate] }, userController.respondManagedProfileRequest);
   fastify.post('/user/managed-profiles/create-sub-account', { preHandler: [authenticate] }, userController.createSubAccountPatient);
 }

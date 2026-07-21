@@ -4,49 +4,85 @@ const AppointmentSlot = require('../models/AppointmentSlot');
 const Organization = require('../models/Organization');
 const User = require('../models/User');
 
-const resolveUserProfile = async ({ accountId, entityId }) => {
+const Account = require('../models/Account');
+
+const resolveUserProfile = async ({ accountId, entityId, entityModel }) => {
+  if (entityModel && entityModel !== 'User') return null;
   if (entityId && mongoose.Types.ObjectId.isValid(entityId)) {
     const user = await User.findById(entityId);
     if (user) return user;
   }
-  if (accountId) return User.findOne({ accountId });
+  if (accountId && mongoose.Types.ObjectId.isValid(accountId)) {
+    let user = await User.findOne({ accountId });
+    if (user) return user;
+  }
   return null;
 };
 
-const resolveOrganization = async ({ accountId, entityId }) => {
+const resolveOrganization = async ({ accountId, entityId, entityModel }) => {
+  if (entityModel && entityModel !== 'Organization') return null;
   if (entityId && mongoose.Types.ObjectId.isValid(entityId)) {
     const organization = await Organization.findById(entityId);
     if (organization) return organization;
   }
-  if (accountId) return Organization.findOne({ accountId });
+  if (accountId && mongoose.Types.ObjectId.isValid(accountId)) {
+    let organization = await Organization.findOne({ accountId });
+    if (organization) return organization;
+  }
   return null;
 };
 
 exports.createSlot = async (request, reply) => {
   try {
+    const user = await resolveUserProfile(request.user || {});
     const organization = await resolveOrganization(request.user || {});
-    if (!organization) return reply.code(403).send({ error: 'Organization identity required.' });
+    const { role } = request.user || {};
+    
+    let targetOrgId = null;
+    let targetDocId = null;
 
-    const { doctorId, title, description, slotDate, startTime, endTime, maxBookings, consultationMode, fee } = request.body || {};
+    if (organization) {
+      targetOrgId = organization._id;
+      if (request.body?.doctorId && mongoose.Types.ObjectId.isValid(request.body.doctorId)) {
+        targetDocId = request.body.doctorId;
+      }
+    } else if (user || role === 'doctor' || role === 'practitioner') {
+      if (user) {
+        if (!user.isDoctor) {
+          user.isDoctor = true;
+          await user.save();
+        }
+        targetDocId = user._id;
+        const maybeOrgId = user.doctorDetails?.affiliatedOrganizations?.[0] || user.doctorDetails?.affiliateOrganization || request.body?.organizationId;
+        if (maybeOrgId && mongoose.Types.ObjectId.isValid(maybeOrgId)) {
+          targetOrgId = maybeOrgId;
+        }
+      }
+    } else {
+      return reply.code(403).send({ error: 'Doctor or Organization identity required to publish consultation slots.' });
+    }
+
+    const { title, description, slotDate, startTime, endTime, maxBookings, consultationMode, fee } = request.body || {};
     if (!slotDate || !startTime || !endTime) {
       return reply.code(400).send({ error: 'slotDate, startTime, and endTime are required.' });
     }
 
     const slot = await AppointmentSlot.create({
-      organizationId: organization._id,
-      doctorId: doctorId && mongoose.Types.ObjectId.isValid(doctorId) ? doctorId : null,
+      organizationId: targetOrgId,
+      doctorId: targetDocId,
       title: title || 'Consultation Slot',
       description: description || '',
       slotDate,
       startTime,
       endTime,
-      maxBookings: parseInt(maxBookings, 10) || 1,
+      maxBookings: parseInt(maxBookings, 10) || 5,
       consultationMode: consultationMode || 'in_person',
       fee: parseFloat(fee) || 0
     });
 
     return reply.code(201).send({ success: true, slot });
   } catch (err) {
+    console.error('createSlot Error:', err);
     return reply.code(500).send({ error: 'Failed to create appointment slot.', details: err.message });
   }
 };
@@ -115,15 +151,38 @@ exports.bookAppointment = async (request, reply) => {
 
 exports.getAppointments = async (request, reply) => {
   try {
-    const { role } = request.user || {};
-    const user = await resolveUserProfile(request.user || {});
-    const organization = await resolveOrganization(request.user || {});
+    const { role, entityModel } = request.user || {};
     const filter = {};
 
-    if (organization) filter.organizationId = organization._id;
-    else if (user?.isDoctor) filter.doctorId = user._id;
-    else if (user) filter.patientId = user._id;
-    else if (role !== 'admin') return reply.code(403).send({ error: 'No appointment identity found.' });
+    if (entityModel === 'Organization') {
+      const organization = await resolveOrganization(request.user || {});
+      if (!organization) return reply.code(403).send({ error: 'Organization identity not found.' });
+      const affiliatedDocIds = organization.affiliatedDoctors || [];
+      filter.$or = [
+        { organizationId: organization._id },
+        ...(affiliatedDocIds.length > 0 ? [{ doctorId: { $in: affiliatedDocIds } }] : [])
+      ];
+    } else if (entityModel === 'User' || role === 'doctor' || role === 'patient') {
+      const user = await resolveUserProfile(request.user || {});
+      if (!user) return reply.code(403).send({ error: 'User identity not found.' });
+      
+      if (user.isDoctor || role === 'doctor') {
+        const affiliatedOrgs = user.doctorDetails?.affiliatedOrganizations || [];
+        const mainAffiliate = user.doctorDetails?.affiliateOrganization;
+        const orgIds = [...affiliatedOrgs, ...(mainAffiliate ? [mainAffiliate] : [])].filter(id => mongoose.Types.ObjectId.isValid(id));
+
+        filter.$or = [
+          { doctorId: user._id },
+          ...(orgIds.length > 0 ? [{ organizationId: { $in: orgIds } }] : [])
+        ];
+      } else {
+        filter.patientId = user._id;
+      }
+    } else if (role === 'admin' || role === 'manager') {
+      // Admin/Manager views all
+    } else {
+      return reply.code(403).send({ error: 'No appointment identity found.' });
+    }
 
     const appointments = await Appointment.find(filter)
       .populate('organizationId', 'name facilityType location contactNumber')

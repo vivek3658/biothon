@@ -83,7 +83,7 @@ exports.logout = async (request, reply) => {
   return reply.send({ success: true, message: 'Logged out successfully.' });
 };
 
-// 2. Complete User Profile (Patient or Doctor)
+// 2. Complete User or Organization Profile
 exports.completeUserProfile = async (request, reply) => {
   try {
     let accountId = request.user?.accountId;
@@ -101,6 +101,87 @@ exports.completeUserProfile = async (request, reply) => {
       return reply.code(400).send({ error: 'Missing target account identity for profile completion.' });
     }
 
+    const account = await Account.findById(accountId);
+    if (!account) {
+      return reply.code(404).send({ error: 'Target account record not found.' });
+    }
+
+    const isOrgAccount = account.entityModel === 'Organization' || 
+      ['hospital', 'clinic', 'laboratory', 'pharmacy', 'other'].includes(account.role) ||
+      Boolean(request.body?.facilityType);
+
+    if (isOrgAccount) {
+      const {
+        name,
+        facilityType,
+        contactNumber,
+        location,
+        coordinates,
+        organizationCertificateNo,
+        organizationCertificateUrl
+      } = request.body || {};
+
+      const cleanLoc = {
+        buildingNo: location?.buildingNo || '',
+        floorNo: parseInt(location?.floorNo, 10) || 0,
+        landmark: location?.landmark || '',
+        city: location?.city?.trim() || 'New Delhi',
+        state: location?.state?.trim() || 'Delhi',
+        pincode: (location?.pincode && location.pincode.toString().trim()) ? location.pincode.toString().trim() : '110001'
+      };
+
+      let cleanCoords = [77.2090, 28.6139];
+      if (Array.isArray(coordinates) && coordinates.length === 2) {
+        cleanCoords = [parseFloat(coordinates[0]) || 77.2090, parseFloat(coordinates[1]) || 28.6139];
+      }
+
+      const targetFacilityType = facilityType || (['hospital', 'clinic', 'laboratory', 'pharmacy'].includes(account.role) ? account.role : 'pharmacy');
+
+      let orgProfile = await Organization.findOne({ accountId: account._id });
+      if (orgProfile) {
+        orgProfile.name = name || orgProfile.name || 'Healthcare Facility';
+        orgProfile.facilityType = targetFacilityType;
+        orgProfile.contactNumber = contactNumber || orgProfile.contactNumber || '+91 9876543210';
+        orgProfile.location = cleanLoc;
+        orgProfile.coordinates = cleanCoords;
+        orgProfile.verificationStatus = 'approved';
+      } else {
+        orgProfile = new Organization({
+          accountId: account._id,
+          name: name || (account.email ? account.email.split('@')[0] : 'Healthcare Facility'),
+          facilityType: targetFacilityType,
+          contactNumber: contactNumber || '+91 9876543210',
+          location: cleanLoc,
+          coordinates: cleanCoords,
+          verificationStatus: 'approved'
+        });
+      }
+      await orgProfile.save();
+
+      account.entityId = orgProfile._id;
+      account.entityModel = 'Organization';
+      account.role = targetFacilityType;
+      await account.save();
+
+      const updatedToken = request.server.jwt.sign({
+        accountId: account._id,
+        entityId: account.entityId,
+        entityModel: account.entityModel,
+        role: account.role
+      });
+
+      reply.setCookie('token', updatedToken, COOKIE_OPTIONS);
+
+      return reply.send({
+        success: true,
+        message: 'Organization profile completed successfully.',
+        token: updatedToken,
+        userProfile: orgProfile,
+        organization: orgProfile
+      });
+    }
+
+    // Otherwise Patient / Doctor User Profile
     const {
       name,
       isDoctor,
@@ -112,11 +193,6 @@ exports.completeUserProfile = async (request, reply) => {
       affiliateOrganization,
       speciality
     } = request.body || {};
-
-    const account = await Account.findById(accountId);
-    if (!account) {
-      return reply.code(404).send({ error: 'Target account record not found.' });
-    }
 
     const cleanLocation = {
       roomNo: location?.roomNo || '',
@@ -207,6 +283,10 @@ exports.getUserMe = async (request, reply) => {
       return reply.code(404).send({ error: 'Account not found.' });
     }
 
+    if (account.entityModel !== 'User') {
+      return reply.code(403).send({ error: 'Account is registered as an Organization, not a User.' });
+    }
+
     let userProfile = null;
     try {
       userProfile = await User.findOne({ accountId: account._id })
@@ -220,7 +300,11 @@ exports.getUserMe = async (request, reply) => {
         })
         .populate({
           path: 'doctorDetails.affiliateOrganization',
-          select: 'name facilityType location contactNumber'
+          select: 'name facilityType location contactNumber verificationStatus'
+        })
+        .populate({
+          path: 'doctorDetails.affiliatedOrganizations',
+          select: 'name facilityType location contactNumber verificationStatus'
         });
     } catch (popErr) {
       userProfile = await User.findOne({ accountId: account._id });
@@ -393,15 +477,171 @@ exports.searchUserByEmail = async (request, reply) => {
   }
 };
 
-// Managed Profile Stubs
+// 8. Managed Profiles & Family Member Workflows
 exports.sendManagedProfileRequest = async (request, reply) => {
-  return reply.send({ success: true, message: 'Request sent.' });
+  try {
+    const { entityId, accountId } = request.user || {};
+    const { email, name, bloodGroup, location, houseNo, roomNo, floorNo, landmark, city, state, pincode } = request.body || {};
+
+    if (!email || !email.trim()) {
+      return reply.code(400).send({ error: 'Family member email is required.' });
+    }
+
+    const cleanEmail = email.toLowerCase().trim();
+
+    let currentUser = null;
+    if (entityId) currentUser = await User.findById(entityId);
+    if (!currentUser && accountId) currentUser = await User.findOne({ accountId });
+
+    if (!currentUser) {
+      return reply.code(404).send({ error: 'Current user profile not found.' });
+    }
+
+    const currentAccount = await Account.findById(currentUser.accountId);
+
+    let targetAccount = await Account.findOne({ email: cleanEmail });
+    let targetUser = null;
+
+    const cleanLoc = {
+      houseNo: houseNo || location?.houseNo || '',
+      roomNo: roomNo || location?.roomNo || '',
+      floorNo: parseInt(floorNo || location?.floorNo, 10) || 0,
+      landmark: landmark || location?.landmark || '',
+      city: city || location?.city?.trim() || 'New Delhi',
+      state: state || location?.state?.trim() || 'Delhi',
+      pincode: (pincode || location?.pincode) ? (pincode || location?.pincode).toString().trim() : '110001'
+    };
+
+    if (targetAccount) {
+      targetUser = await User.findOne({ accountId: targetAccount._id });
+      if (!targetUser) {
+        targetUser = new User({
+          accountId: targetAccount._id,
+          name: name || cleanEmail.split('@')[0],
+          bloodGroup: bloodGroup || 'A+',
+          location: cleanLoc
+        });
+        await targetUser.save();
+      }
+
+      if (!currentUser.managedProfiles.includes(targetUser._id)) {
+        currentUser.managedProfiles.push(targetUser._id);
+        await currentUser.save();
+      }
+
+      targetUser.pendingProfileRequests.push({
+        fromUserId: currentUser._id,
+        fromEmail: currentAccount?.email || '',
+        status: 'accepted'
+      });
+      await targetUser.save();
+
+      return reply.send({
+        success: true,
+        message: `Existing patient (${cleanEmail}) linked to your family profiles.`,
+        targetUser
+      });
+    } else {
+      const randomPassword = await bcrypt.hash(`sub_${Date.now()}_${Math.random()}`, 10);
+      targetAccount = new Account({
+        email: cleanEmail,
+        password: randomPassword,
+        role: 'patient',
+        entityModel: 'User'
+      });
+      await targetAccount.save();
+
+      targetUser = new User({
+        accountId: targetAccount._id,
+        name: name || cleanEmail.split('@')[0],
+        bloodGroup: bloodGroup || 'A+',
+        location: cleanLoc
+      });
+      await targetUser.save();
+
+      targetAccount.entityId = targetUser._id;
+      await targetAccount.save();
+
+      currentUser.managedProfiles.push(targetUser._id);
+      await currentUser.save();
+
+      return reply.send({
+        success: true,
+        message: `New family profile created for ${name || cleanEmail} and auto-linked!`,
+        targetUser
+      });
+    }
+  } catch (err) {
+    console.error('sendManagedProfileRequest error:', err);
+    return reply.code(500).send({ error: 'Failed to manage family profile.', details: err.message });
+  }
+};
+
+exports.removeManagedProfile = async (request, reply) => {
+  try {
+    const { entityId, accountId } = request.user || {};
+    const { targetUserId } = request.params || {};
+
+    let currentUser = null;
+    if (entityId) currentUser = await User.findById(entityId);
+    if (!currentUser && accountId) currentUser = await User.findOne({ accountId });
+
+    if (!currentUser) {
+      return reply.code(404).send({ error: 'Current user profile not found.' });
+    }
+
+    currentUser.managedProfiles = currentUser.managedProfiles.filter(
+      id => id.toString() !== targetUserId.toString()
+    );
+    await currentUser.save();
+
+    return reply.send({
+      success: true,
+      message: 'Family member profile unlinked successfully.'
+    });
+  } catch (err) {
+    return reply.code(500).send({ error: 'Failed to remove managed profile.', details: err.message });
+  }
 };
 
 exports.respondManagedProfileRequest = async (request, reply) => {
-  return reply.send({ success: true, message: 'Request updated.' });
+  try {
+    const { entityId, accountId } = request.user || {};
+    const { requestId } = request.params || {};
+    const { status } = request.body || {};
+
+    let currentUser = null;
+    if (entityId) currentUser = await User.findById(entityId);
+    if (!currentUser && accountId) currentUser = await User.findOne({ accountId });
+
+    if (!currentUser) {
+      return reply.code(404).send({ error: 'Current user profile not found.' });
+    }
+
+    const reqItem = currentUser.pendingProfileRequests.id(requestId);
+    if (!reqItem) {
+      return reply.code(404).send({ error: 'Request item not found.' });
+    }
+
+    reqItem.status = status || 'accepted';
+
+    if (status === 'accepted' && reqItem.fromUserId) {
+      const fromUser = await User.findById(reqItem.fromUserId);
+      if (fromUser && !fromUser.managedProfiles.includes(currentUser._id)) {
+        fromUser.managedProfiles.push(currentUser._id);
+        await fromUser.save();
+      }
+    }
+
+    await currentUser.save();
+
+    return reply.send({
+      success: true,
+      message: `Profile request ${status || 'accepted'}.`
+    });
+  } catch (err) {
+    return reply.code(500).send({ error: 'Failed to respond to request.', details: err.message });
+  }
 };
 
-exports.createSubAccountPatient = async (request, reply) => {
-  return reply.send({ success: true, message: 'Sub-account created.' });
-};
+exports.createSubAccountPatient = exports.sendManagedProfileRequest;

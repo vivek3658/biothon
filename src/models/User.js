@@ -19,6 +19,7 @@ const UserSchema = new mongoose.Schema({
     default: false
   },
   location: {
+    houseNo: { type: String, trim: true, default: '' },
     roomNo: { type: String, trim: true, default: '' },
     floorNo: { type: Number, default: 0 },
     landmark: { type: String, trim: true, default: '' },
@@ -56,6 +57,7 @@ const UserSchema = new mongoose.Schema({
     certificateDoc: { type: String, default: '', trim: true },
     affiliateOrganization: { type: mongoose.Schema.Types.ObjectId, ref: 'Organization', default: null },
     affiliateOrganizationApprovalStatus: { type: String, default: 'pending' },
+    affiliatedOrganizations: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Organization' }],
     speciality: { type: String, default: 'General Medicine', trim: true },
     managerApprovalStatus: { type: String, default: 'pending' }
   }

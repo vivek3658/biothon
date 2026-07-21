@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
 
 const AppointmentSlotSchema = new mongoose.Schema({
-  organizationId: { type: mongoose.Schema.Types.ObjectId, ref: 'Organization', required: true },
+  organizationId: { type: mongoose.Schema.Types.ObjectId, ref: 'Organization', default: null, required: false },
   doctorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   title: { type: String, trim: true, default: 'Consultation Slot' },
   description: { type: String, trim: true, default: '' },

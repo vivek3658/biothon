@@ -7,7 +7,9 @@ async function medicineRoutes(fastify, options) {
   fastify.get('/medicines', { preHandler: [authenticate] }, medicineController.getAllMedicines);
   fastify.get('/medicines/:id', { preHandler: [authenticate] }, medicineController.getMedicineById);
 
-  // 2. Strict Admin-only CRUD operations
+  // 2. Strict Admin-only CRUD & Seeding operations
+  fastify.post('/admin/medicines/seed', { preHandler: [isAdmin] }, medicineController.seedMedicines);
+  fastify.get('/admin/medicines/seed', { preHandler: [isAdmin] }, medicineController.seedMedicines);
   fastify.post('/admin/medicines', { preHandler: [isAdmin] }, medicineController.createMedicine);
   fastify.get('/admin/medicines', { preHandler: [isAdmin] }, medicineController.getAllMedicines);
   fastify.get('/admin/medicines/:id', { preHandler: [isAdmin] }, medicineController.getMedicineById);

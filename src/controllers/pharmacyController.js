@@ -6,12 +6,17 @@ const MedicineOrder = require('../models/MedicineOrder');
 const Prescription = require('../models/Prescription');
 const User = require('../models/User');
 
-const resolveOrganization = async ({ accountId, entityId }) => {
+const Account = require('../models/Account');
+
+const resolveOrganization = async ({ accountId, entityId, role }) => {
   if (entityId && mongoose.Types.ObjectId.isValid(entityId)) {
-    const organization = await Organization.findById(entityId);
-    if (organization) return organization;
+    const org = await Organization.findById(entityId);
+    if (org) return org;
   }
-  if (accountId) return Organization.findOne({ accountId });
+  if (accountId && mongoose.Types.ObjectId.isValid(accountId)) {
+    const org = await Organization.findOne({ accountId });
+    if (org) return org;
+  }
   return null;
 };
 
@@ -26,15 +31,21 @@ const resolveUser = async ({ accountId, entityId }) => {
 
 exports.upsertInventoryItem = async (request, reply) => {
   try {
-    const organization = await resolveOrganization(request.user || {});
-    if (!organization || organization.facilityType !== 'pharmacy') return reply.code(403).send({ error: 'Only pharmacy organizations can manage inventory.' });
+    let organization = await resolveOrganization(request.user || {});
+    if (!organization) return reply.code(403).send({ error: 'Organization identity required to manage inventory.' });
+
+    // Auto-heal facilityType if needed
+    if (organization.facilityType !== 'pharmacy') {
+      organization.facilityType = 'pharmacy';
+      await organization.save();
+    }
 
     const { medicineId, companyName, price, stock, isActive = true } = request.body || {};
     if (!medicineId || !mongoose.Types.ObjectId.isValid(medicineId)) return reply.code(400).send({ error: 'Valid medicineId is required.' });
     if (!companyName?.trim()) return reply.code(400).send({ error: 'companyName is required.' });
 
     const medicine = await Medicine.findById(medicineId);
-    if (!medicine) return reply.code(404).send({ error: 'Medicine not found.' });
+    if (!medicine) return reply.code(404).send({ error: 'Medicine not found in catalog.' });
 
     const item = await PharmacyInventory.findOneAndUpdate(
       { organizationId: organization._id, medicineId, companyName: companyName.trim() },
@@ -44,6 +55,7 @@ exports.upsertInventoryItem = async (request, reply) => {
 
     return reply.send({ success: true, item });
   } catch (err) {
+    console.error('upsertInventoryItem Error:', err);
     return reply.code(500).send({ error: 'Failed to update pharmacy inventory.', details: err.message });
   }
 };

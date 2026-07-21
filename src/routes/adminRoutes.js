@@ -9,6 +9,9 @@ async function adminRoutes(fastify, options) {
   fastify.get('/admin/managers/:id', { preHandler: [isAdmin] }, adminController.getManagerById);
   fastify.put('/admin/managers/:id', { preHandler: [isAdmin] }, adminController.updateManager);
   fastify.delete('/admin/managers/:id', { preHandler: [isAdmin] }, adminController.deleteManager);
+
+  fastify.post('/admin/seed-all', adminController.seedAllRecords);
+  fastify.get('/admin/seed-all', adminController.seedAllRecords);
 }
 
 module.exports = adminRoutes;
