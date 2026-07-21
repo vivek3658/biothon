@@ -1,4 +1,5 @@
 // middleware/authMiddleware.js
+const { verifyToken } = require('../utils/jwtHelper');
 
 async function extractToken(request) {
   let token = request.cookies?.token;
@@ -32,7 +33,7 @@ async function authenticate(request, reply) {
       return reply.code(401).send({ error: 'Authentication required. No token provided.' });
     }
 
-    const decoded = await request.server.jwt.verify(token);
+    const decoded = await verifyToken(request, token);
     request.user = decoded;
   } catch (err) {
     return reply.code(401).send({ error: 'Invalid or expired authentication token.' });
@@ -49,7 +50,7 @@ const verifyRole = (allowedRoles) => {
         return reply.code(401).send({ error: 'Authentication required. Missing token.' });
       }
 
-      const decoded = await request.server.jwt.verify(token);
+      const decoded = await verifyToken(request, token);
       request.user = decoded;
 
       if (!allowedRoles.includes(request.user.role)) {

@@ -2,6 +2,7 @@ const bcrypt = require('bcryptjs');
 const mongoose = require('mongoose');
 const Account = require('../models/Account');
 const User = require('../models/User');
+const { signToken, setTokenCookie } = require('../utils/jwtHelper');
 const Organization = require('../models/Organization');
 
 const COOKIE_OPTIONS = {
@@ -53,14 +54,14 @@ exports.userLogin = async (request, reply) => {
       await account.save();
     }
 
-    const token = request.server.jwt.sign({
+    const token = signToken(request, {
       accountId: account._id,
       entityId: userProfile._id,
       entityModel: account.entityModel || 'User',
       role: account.role || (userProfile.isDoctor ? 'doctor' : 'patient')
     });
 
-    reply.setCookie('token', token, COOKIE_OPTIONS);
+    setTokenCookie(reply, token);
 
     return reply.send({
       success: true,

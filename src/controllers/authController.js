@@ -4,6 +4,7 @@ const Account = require('../models/Account');
 const Organization = require('../models/Organization');
 const User = require('../models/User');
 const { OAuth2Client } = require('google-auth-library');
+const { signToken, setTokenCookie } = require('../utils/jwtHelper');
 
 const COOKIE_OPTIONS = {
   path: '/',
@@ -29,13 +30,13 @@ exports.createAccount = async (request, reply) => {
     const existing = await Account.findOne({ email: cleanEmail });
     if (existing) {
       if (!existing.entityId) {
-        const token = request.server.jwt.sign({
+        const token = signToken(request, {
           accountId: existing._id,
           entityModel: existing.entityModel,
           role: existing.role,
           onboardingStatus: 'pending_profile'
         });
-        reply.setCookie('token', token, COOKIE_OPTIONS);
+        setTokenCookie(reply, token);
         return reply.code(200).send({
           success: true,
           message: 'Uncompleted account found. Resuming profile completion.',
@@ -59,14 +60,14 @@ exports.createAccount = async (request, reply) => {
 
     await account.save();
 
-    const token = request.server.jwt.sign({
+    const token = signToken(request, {
       accountId: account._id,
       entityModel: account.entityModel,
       role: account.role,
       onboardingStatus: 'pending_profile'
     });
 
-    reply.setCookie('token', token, COOKIE_OPTIONS);
+    setTokenCookie(reply, token);
 
     return reply.code(201).send({
       success: true,
@@ -165,14 +166,14 @@ exports.completeOrgProfile = async (request, reply) => {
     account.entityModel = 'Organization';
     await account.save();
 
-    const updatedToken = request.server.jwt.sign({
+    const updatedToken = signToken(request, {
       accountId: account._id,
       entityId: organization._id,
       entityModel: 'Organization',
       role: account.role
     });
 
-    reply.setCookie('token', updatedToken, COOKIE_OPTIONS);
+    setTokenCookie(reply, updatedToken);
 
     return reply.send({
       success: true,
@@ -232,14 +233,14 @@ exports.organizationLogin = async (request, reply) => {
       await account.save();
     }
 
-    const token = request.server.jwt.sign({
+    const token = signToken(request, {
       accountId: account._id,
       entityId: organization._id,
       entityModel: 'Organization',
       role: account.role || 'hospital'
     });
 
-    reply.setCookie('token', token, COOKIE_OPTIONS);
+    setTokenCookie(reply, token);
 
     return reply.send({
       success: true,
@@ -398,13 +399,13 @@ exports.googleLogin = async (request, reply) => {
     if (account.entityModel === 'Organization') {
       const organization = await Organization.findOne({ accountId: account._id });
       if (!organization) {
-        const pendingToken = request.server.jwt.sign({
+        const pendingToken = signToken(request, {
           accountId: account._id,
           entityModel: 'Organization',
           role: account.role || 'hospital',
           onboardingStatus: 'pending_profile'
         });
-        reply.setCookie('token', pendingToken, COOKIE_OPTIONS);
+        setTokenCookie(reply, pendingToken);
         return reply.send({
           success: true,
           message: 'Google login verified. Please complete your organization profile.',
@@ -418,13 +419,13 @@ exports.googleLogin = async (request, reply) => {
         });
       }
 
-      const token = request.server.jwt.sign({
+      const token = signToken(request, {
         accountId: account._id,
         entityId: organization._id,
         entityModel: 'Organization',
         role: account.role || organization.facilityType || 'hospital'
       });
-      reply.setCookie('token', token, COOKIE_OPTIONS);
+      setTokenCookie(reply, token);
       return reply.send({
         success: true,
         message: 'Google Organization login successful.',
@@ -444,13 +445,13 @@ exports.googleLogin = async (request, reply) => {
     } else {
       const userProfile = await User.findOne({ accountId: account._id });
       if (!userProfile) {
-        const pendingToken = request.server.jwt.sign({
+        const pendingToken = signToken(request, {
           accountId: account._id,
           entityModel: 'User',
           role: account.role || 'patient',
           onboardingStatus: 'pending_profile'
         });
-        reply.setCookie('token', pendingToken, COOKIE_OPTIONS);
+        setTokenCookie(reply, pendingToken);
         return reply.send({
           success: true,
           message: 'Google login verified. Please complete your user profile.',
@@ -465,13 +466,13 @@ exports.googleLogin = async (request, reply) => {
       }
 
       const role = account.role || (userProfile.isDoctor ? 'doctor' : 'patient');
-      const token = request.server.jwt.sign({
+      const token = signToken(request, {
         accountId: account._id,
         entityId: userProfile._id,
         entityModel: 'User',
         role
       });
-      reply.setCookie('token', token, COOKIE_OPTIONS);
+      setTokenCookie(reply, token);
       return reply.send({
         success: true,
         message: 'Google User login successful.',
